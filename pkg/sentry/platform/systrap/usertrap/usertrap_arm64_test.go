@@ -17,6 +17,7 @@
 package usertrap
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"gvisor.dev/gvisor/pkg/hostarch"
@@ -605,5 +606,142 @@ func TestReserveTrap(t *testing.T) {
 					table.nextTrap, tc.wantNextTrap)
 			}
 		})
+	}
+}
+
+func TestEncodeSubX8Immediate(t *testing.T) {
+	tests := []struct {
+		name string
+		imm  uint64
+		want uint32
+	}{
+		{name: "zero", imm: 0, want: 0xd1000108},
+		{name: "syscall63", imm: 63, want: 0xd100fd08},
+		{name: "max", imm: 0xfff, want: 0xd13ffd08},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := encodeSubX8Immediate(test.imm)
+			if err != nil {
+				t.Fatalf("encodeSubX8Immediate(%d): %v", test.imm, err)
+			}
+			if got != test.want {
+				t.Fatalf("encodeSubX8Immediate(%d) = %#08x, want %#08x", test.imm, got, test.want)
+			}
+		})
+	}
+
+	if _, err := encodeSubX8Immediate(0x1000); err == nil {
+		t.Fatalf("encodeSubX8Immediate(0x1000) succeeded, want error")
+	}
+}
+
+func TestEncodeAddX8Immediate(t *testing.T) {
+	tests := []struct {
+		name string
+		imm  uint64
+		want uint32
+	}{
+		{name: "zero", imm: 0, want: 0x91000108},
+		{name: "syscall63", imm: 63, want: 0x9100fd08},
+		{name: "max", imm: 0xfff, want: 0x913ffd08},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := encodeAddX8Immediate(test.imm)
+			if err != nil {
+				t.Fatalf("encodeAddX8Immediate(%d): %v", test.imm, err)
+			}
+			if got != test.want {
+				t.Fatalf("encodeAddX8Immediate(%d) = %#08x, want %#08x", test.imm, got, test.want)
+			}
+		})
+	}
+
+	if _, err := encodeAddX8Immediate(0x1000); err == nil {
+		t.Fatalf("encodeAddX8Immediate(0x1000) succeeded, want error")
+	}
+}
+
+func TestEncodeCBNZX8(t *testing.T) {
+	tests := []struct {
+		name string
+		src  uintptr
+		dst  uintptr
+		want uint32
+	}{
+		{
+			name: "assemblerForward",
+			src:  0x18,
+			dst:  0x20,
+			want: 0xb5000048,
+		},
+		{
+			name: "assemblerBackward",
+			src:  0x20,
+			dst:  0x0,
+			want: 0xb5ffff08,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := encodeCBNZX8(test.src, test.dst)
+			if err != nil {
+				t.Fatalf("encodeCBNZX8(%#x, %#x): %v", test.src, test.dst, err)
+			}
+			if got != test.want {
+				t.Fatalf("encodeCBNZX8(%#x, %#x) = %#08x, want %#08x",
+					test.src, test.dst, got, test.want)
+			}
+		})
+	}
+
+	const src = uintptr(0x100000)
+
+	if _, err := encodeCBNZX8(src, src+(1<<20)-arm64InstSize); err != nil {
+		t.Fatalf("maximum forward CBNZ failed: %v", err)
+	}
+	if _, err := encodeCBNZX8(src, src-(1<<20)); err != nil {
+		t.Fatalf("maximum backward CBNZ failed: %v", err)
+	}
+	if _, err := encodeCBNZX8(src, src+(1<<20)); err == nil {
+		t.Fatalf("out-of-range forward CBNZ succeeded")
+	}
+	if _, err := encodeCBNZX8(src, src-(1<<20)-arm64InstSize); err == nil {
+		t.Fatalf("out-of-range backward CBNZ succeeded")
+	}
+	if _, err := encodeCBNZX8(src, src+2); err == nil {
+		t.Fatalf("unaligned CBNZ succeeded")
+	}
+}
+
+func TestBuildSyscallNumberCheck(t *testing.T) {
+	const (
+		addr     = uintptr(0x10000)
+		mismatch = uintptr(0x10040)
+		sysno    = uint64(63)
+	)
+
+	code, err := buildSyscallNumberCheck(addr, mismatch, sysno)
+	if err != nil {
+		t.Fatalf("buildSyscallNumberCheck: %v", err)
+	}
+	if len(code) != arm64SpecializationSize {
+		t.Fatalf("len(code) = %d, want %d", len(code), arm64SpecializationSize)
+	}
+
+	if got := binary.LittleEndian.Uint32(code[:4]); got != 0xd100fd08 {
+		t.Fatalf("sub = %#08x, want %#08x", got, uint32(0xd100fd08))
+	}
+
+	wantBranch, err := encodeCBNZX8(addr+arm64InstSize, mismatch)
+	if err != nil {
+		t.Fatalf("encodeCBNZX8: %v", err)
+	}
+	if got := binary.LittleEndian.Uint32(code[4:]); got != wantBranch {
+		t.Fatalf("cbnz = %#08x, want %#08x", got, wantBranch)
 	}
 }
