@@ -745,3 +745,84 @@ func TestBuildSyscallNumberCheck(t *testing.T) {
 		t.Fatalf("cbnz = %#08x, want %#08x", got, wantBranch)
 	}
 }
+
+func TestARM64BootstrapInstructionEncodings(t *testing.T) {
+	if arm64MRSTPIDREL0 != 0xd53bd048 {
+		t.Fatalf("MRS TPIDR_EL0 = %#08x", arm64MRSTPIDREL0)
+	}
+	if arm64NEGX8 != 0xcb0803e8 {
+		t.Fatalf("NEG x8 = %#08x", arm64NEGX8)
+	}
+	if arm64SWPAX8 != 0xf8a88108 {
+		t.Fatalf("SWPA x8, x8, [x8] = %#08x", arm64SWPAX8)
+	}
+}
+
+func TestEncodeCBZX8(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     uintptr
+		dst     uintptr
+		want    uint32
+		wantErr bool
+	}{
+		{
+			name: "assemblerForward",
+			src:  0x30,
+			dst:  0x48,
+			want: 0xb40000c8,
+		},
+		{
+			name: "maxForward",
+			src:  0,
+			dst:  (1 << 20) - arm64InstSize,
+		},
+		{
+			name: "maxBackward",
+			src:  1 << 20,
+			dst:  0,
+		},
+		{
+			name:    "outOfRangeForward",
+			src:     0,
+			dst:     1 << 20,
+			wantErr: true,
+		},
+		{
+			name:    "outOfRangeBackward",
+			src:     (1 << 20) + arm64InstSize,
+			dst:     0,
+			wantErr: true,
+		},
+		{
+			name:    "unalignedSource",
+			src:     2,
+			dst:     8,
+			wantErr: true,
+		},
+		{
+			name:    "unalignedTarget",
+			src:     0,
+			dst:     6,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := encodeCBZX8(tt.src, tt.dst)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("encodeCBZX8(%#x, %#x) unexpectedly succeeded: %#08x", tt.src, tt.dst, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("encodeCBZX8(%#x, %#x): %v", tt.src, tt.dst, err)
+			}
+			if tt.want != 0 && got != tt.want {
+				t.Fatalf("encodeCBZX8(%#x, %#x) = %#08x, want %#08x", tt.src, tt.dst, got, tt.want)
+			}
+		})
+	}
+}

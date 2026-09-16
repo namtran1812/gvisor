@@ -24,7 +24,6 @@ import (
 const (
 	arm64SubX8ImmBase = uint32(0xd1000108)
 	arm64AddX8ImmBase = uint32(0x91000108)
-	arm64CBNZX8Base   = uint32(0xb5000008)
 
 	arm64SpecializationInstructions = 2
 	arm64SpecializationSize         = arm64SpecializationInstructions * arm64InstSize
@@ -55,34 +54,6 @@ func encodeSubX8Immediate(imm uint64) (uint32, error) {
 // reconstruct the original syscall number before falling back to SVC.
 func encodeAddX8Immediate(imm uint64) (uint32, error) {
 	return encodeX8Immediate(arm64AddX8ImmBase, imm)
-}
-
-// encodeCBNZX8 encodes a CBNZ x8 from src to dst.
-//
-// AArch64 CBNZ uses a signed 19-bit immediate scaled by four, giving a branch
-// range of [-1 MiB, 1 MiB - 4].
-func encodeCBNZX8(src, dst uintptr) (uint32, error) {
-	if src%arm64InstSize != 0 || dst%arm64InstSize != 0 {
-		return 0, fmt.Errorf("unaligned CBNZ: src=%#x dst=%#x", src, dst)
-	}
-
-	var delta int64
-	if dst >= src {
-		d := dst - src
-		if d > uintptr((1<<20)-arm64InstSize) {
-			return 0, fmt.Errorf("CBNZ target out of range: src=%#x dst=%#x", src, dst)
-		}
-		delta = int64(d)
-	} else {
-		d := src - dst
-		if d > uintptr(1<<20) {
-			return 0, fmt.Errorf("CBNZ target out of range: src=%#x dst=%#x", src, dst)
-		}
-		delta = -int64(d)
-	}
-
-	imm19 := uint32(delta>>2) & 0x7ffff
-	return arm64CBNZX8Base | imm19<<5, nil
 }
 
 // buildSyscallNumberCheck emits:

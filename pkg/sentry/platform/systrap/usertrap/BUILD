@@ -9,6 +9,7 @@ go_library(
     name = "usertrap",
     srcs = [
         "arm64_branch.go",
+        "arm64_bootstrap.go",
         "arm64_specialization.go",
         "usertrap.go",
         "usertrap_amd64.go",
