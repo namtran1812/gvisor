@@ -29,12 +29,13 @@
 #include "atomic.h"
 #include "sysmsg.h"
 #include "sysmsg_offsets.h"
+#include "sysmsg_offsets_arm64.h"
 
 // TODO(b/271631387): These globals are shared between AMD64 and ARM64; move to
 // sysmsg_lib.c.
 struct arch_state __export_arch_state;
 uint64_t __export_stub_start;
-// Note: This flag doesn't do anything for ARM. See AMD64 equivalent.
+// Disables syscall patching when non-zero.
 uint64_t __export_disable_syscall_patching;
 
 long __syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6) {
@@ -94,6 +95,21 @@ static void ptregs_to_gregs(ucontext_t *ucontext,
   ucontext->uc_mcontext.pstate = ptregs->pstate;
 }
 
+void verify_offsets_arm64() {
+#define PTREGS_OFFSET offsetof(struct thread_context, ptregs)
+  BUILD_BUG_ON(offsetof_thread_context_ptregs != PTREGS_OFFSET);
+  BUILD_BUG_ON(offsetof_thread_context_ptregs_x(0) !=
+               (offsetof(struct user_regs_struct, regs) + PTREGS_OFFSET));
+  BUILD_BUG_ON(sizeof(((struct user_regs_struct *)0)->regs) != 31 * sizeof(uint64_t));
+  BUILD_BUG_ON(offsetof_thread_context_ptregs_sp !=
+               (offsetof(struct user_regs_struct, sp) + PTREGS_OFFSET));
+  BUILD_BUG_ON(offsetof_thread_context_ptregs_pc !=
+               (offsetof(struct user_regs_struct, pc) + PTREGS_OFFSET));
+  BUILD_BUG_ON(offsetof_thread_context_ptregs_pstate !=
+               (offsetof(struct user_regs_struct, pstate) + PTREGS_OFFSET));
+#undef PTREGS_OFFSET
+}
+
 void __export_start(struct sysmsg *sysmsg, void *_ucontext) {
   panic(0x11111111, 0);
 }
@@ -146,6 +162,15 @@ void __export_sighandler(int signo, siginfo_t *siginfo, void *_ucontext) {
   switch (signo) {
     case SIGSYS: {
       ctx_state = CONTEXT_STATE_SYSCALL;
+
+      // AArch64 syscall instructions are fixed-width. Defer validation of the
+      // trapped instruction to PatchSyscall(), where application memory can be
+      // accessed through the memory manager.
+      if (__export_disable_syscall_patching == 0 &&
+          siginfo->si_arch == AUDIT_ARCH_AARCH64) {
+        ctx_state = CONTEXT_STATE_SYSCALL_NEED_TRAP;
+      }
+
       if (siginfo->si_arch != AUDIT_ARCH_AARCH64) {
         // gVisor doesn't support x32 system calls, so let's change the syscall
         // number so that it returns ENOSYS. The value added here is just a

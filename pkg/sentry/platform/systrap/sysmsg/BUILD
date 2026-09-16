@@ -19,7 +19,10 @@ cc_pie_obj(
             "sighandler_amd64.c",
             "sysmsg_offsets_amd64.h",
         ],
-        arm64 = ["sighandler_arm64.c"],
+        arm64 = [
+            "sighandler_arm64.c",
+            "sysmsg_offsets_arm64.h",
+        ],
     ) + [
         "atomic.h",
         "sysmsg.h",
@@ -55,7 +58,10 @@ cc_pie_obj(
             "syshandler_amd64.S",
             "sysmsg_offsets_amd64.h",
         ],
-        arm64 = ["syshandler_arm64.S"],
+        arm64 = [
+            "syshandler_arm64.S",
+            "sysmsg_offsets_arm64.h",
+        ],
     ) + [
         "sysmsg_offsets.h",
     ],
